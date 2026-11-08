@@ -12,6 +12,7 @@ locals {
     "roles/compute.networkViewer",
     "roles/container.viewer",
     "roles/gkehub.viewer",
+    "roles/orgpolicy.policyViewer",
     "roles/secretmanager.viewer",
     "roles/serviceusage.serviceUsageConsumer",
     "roles/browser",
@@ -38,5 +39,12 @@ resource "google_organization_iam_member" "kubespace" {
 resource "google_project_service" "resource_manager" {
   project            = var.quota_project_id
   service            = "cloudresourcemanager.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Discovery reads effective org policies (Domain Restricted Sharing and others) through this API.
+resource "google_project_service" "org_policy" {
+  project            = var.quota_project_id
+  service            = "orgpolicy.googleapis.com"
   disable_on_destroy = false
 }

@@ -9,7 +9,7 @@ or service-account key is created, and nothing is stored at Kubespace.
 | --- | --- | --- |
 | `aws` | Role `KubespaceReadOnly` (SecurityAudit, ViewOnlyAccess) in this account, and a service-managed StackSet that deploys the same role (`role.yaml`) to every account of the units you choose | Every account in those units, including accounts added later. Accounts that leave lose the role. |
 | `azure` | A user-assigned managed identity with a federated credential for your Kubespace subject, and **Reader** on a management group | Every subscription under the group, including subscriptions added later |
-| `gcp` | The read roles of a single-project connection, plus `roles/browser`, on a folder or organization | Every project under it, including projects added later |
+| `gcp` | The read roles of a single-project connection (including `roles/orgpolicy.policyViewer`), plus `roles/browser`, on a folder or organization | Every project under it, including projects added later |
 
 Use only the submodules you need; each one needs only its own provider.
 
@@ -19,7 +19,7 @@ Reference each submodule from this repository with a release tag, never `main`:
 
 ```hcl
 module "kubespace_gcp" {
-  source = "git::https://github.com/kubespaceai/cloud-onboarding.git//terraform/gcp?ref=v1.0.0"
+  source = "git::https://github.com/kubespaceai/cloud-onboarding.git//terraform/gcp?ref=v1.1.0"
 
   org_service_account = "<email Kubespace gives you>"
   scope_type          = "folder"

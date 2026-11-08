@@ -8,7 +8,7 @@ Do not use `main` for onboarding. Use the release that Kubespace links to.
 
 | Part | Status |
 | --- | --- |
-| `terraform/` | Released from `v1.0.0` |
+| `terraform/` | Released from `v1.1.0` |
 | `gcp/` | Not released yet |
 
 ## What lives here
