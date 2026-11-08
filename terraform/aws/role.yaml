@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Read-only role that Kubespace assumes with your organization's own Google identity. No access key is created.
+Parameters:
+  OrgSubject:
+    Type: String
+    Description: Unique ID of your organization's Kubespace Google service account.
+    AllowedPattern: "[0-9]{1,64}"
+  OrgAudience:
+    Type: String
+    Description: Audience of your organization's Kubespace identity tokens.
+    AllowedPattern: "https://[^ ]{1,240}"
+Resources:
+  KubespaceReadOnly:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: KubespaceReadOnly
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: accounts.google.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                accounts.google.com:aud: !Ref OrgSubject
+                accounts.google.com:sub: !Ref OrgSubject
+                accounts.google.com:oaud: !Ref OrgAudience
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/SecurityAudit
+        - arn:aws:iam::aws:policy/job-function/ViewOnlyAccess
+Outputs:
+  RoleArn:
+    Value: !GetAtt KubespaceReadOnly.Arn
