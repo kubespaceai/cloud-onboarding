@@ -49,10 +49,18 @@ module "kubespace_azure" {
 module "kubespace_gcp" {
   source = "../../gcp"
 
-  org_service_account = "ks-org-example1@kubespace-example.iam.gserviceaccount.com"
-  scope_type          = "folder"
-  scope_id            = "100000000000"
-  quota_project_id    = "example-billing"
+  # A customer pool: Kubespace's setup gives each value.
+  org_subject         = "100000000000000000001"
+  pool_project_id     = "example-identity"
+  pool_project_number = "123456789012"
+  pool_id             = "kubespace-0123456789"
+
+  scope_type       = "folder"
+  scope_id         = "100000000000"
+  quota_project_id = "example-billing"
+
+  # Optional: the perimeter around the folder, if it has one.
+  # vpc_sc_perimeter = "accessPolicies/123456789/servicePerimeters/example"
 }
 
 output "kubespace_setup" {
