@@ -162,11 +162,12 @@ def encode(scope_type: str, scope_id: str, quota: str, pool_project: str, number
 # --- gcloud ---------------------------------------------------------------------------------
 
 class GcloudError(Exception):
-    def __init__(self, args: list[str], reason: str, stderr: str) -> None:
+    def __init__(self, args: list[str], reason: str, stderr: str, retried: bool = False) -> None:
         super().__init__(reason)
         self.args_ = args
         self.reason = reason
         self.stderr = stderr
+        self.retried = retried  # The step was retried while IAM caught up, and still failed.
 
 
 def classify(stderr: str) -> str:
@@ -214,10 +215,15 @@ class Change:
     what: str
     args: list[str]
     file: str | None = None  # Content for the one argument that names a file ({file}).
-    retry_not_found: bool = False  # A just-created service account takes a moment to appear.
+    after_account_create: bool = False  # Follows creating the service account: IAM takes a while to see it.
 
     def command(self, path: str = "FILE") -> list[str]:
         return [a.replace("{file}", path) for a in self.args]
+
+
+# Waits between tries of a step that follows creating the service account: a minute in all.
+CATCH_UP_DELAYS = (5, 10, 15, 15, 15)
+CATCH_UP_REASONS = ("not_found", "permission_denied")
 
 
 @dataclass
@@ -341,7 +347,7 @@ def plan(bp: dict[str, Any], cloud: Cloud, perimeter: str | None = None) -> Plan
         result.changes.append(Change(f"let only your Kubespace org impersonate {reader}",
                                      ["iam", "service-accounts", "add-iam-policy-binding", reader, f"--project={p}",
                                       f"--role={IMPERSONATION_ROLE}", f"--member={bp['impersonation_member']}"],
-                                     retry_not_found=True))
+                                     after_account_create=account is None))
 
     kind, scope_id = bp["scope"]["type"], bp["scope"]["id"]
     group = _scope_group(kind)
@@ -355,7 +361,8 @@ def plan(bp: dict[str, Any], cloud: Cloud, perimeter: str | None = None) -> Plan
         else:
             result.changes.append(Change(f"grant {role} on {kind} {scope_id} to {reader}",
                                          [*group, "add-iam-policy-binding", scope_id, f"--member={member}",
-                                          f"--role={role}", "--condition=None"], retry_not_found=True))
+                                          f"--role={role}", "--condition=None"],
+                                         after_account_create=account is None))
 
     _plan_apis(cloud, result, bp["quota_project"], bp["apis"]["quota_project"], seen)
 
@@ -400,13 +407,16 @@ def apply(changes: list[Change], run: Runner, out: Any, sleep: Callable[[float],
                 with os.fdopen(handle, "w") as written:
                     written.write(change.file)
             args = change.command(path or "")
-            for attempt in range(6):
+            delays = iter(CATCH_UP_DELAYS if change.after_account_create else ())
+            retried = False
+            while True:
                 code, _, err = run(args)
                 reason = classify(err) if code else None
-                if reason == "not_found" and change.retry_not_found and attempt < 5:
-                    sleep(5)  # IAM takes a few seconds to see a new service account.
-                    continue
-                break
+                delay = next(delays, None) if reason in CATCH_UP_REASONS else None
+                if delay is None:
+                    break
+                retried = True
+                sleep(delay)  # IAM takes a while to see a service account created seconds ago.
         finally:
             if path:
                 os.unlink(path)
@@ -414,7 +424,7 @@ def apply(changes: list[Change], run: Runner, out: Any, sleep: Callable[[float],
             print(f"  exists     {change.what}", file=out)
             continue
         if code != 0:
-            raise GcloudError(args, reason or "error", err)
+            raise GcloudError(args, reason or "error", err, retried)
         made += 1
         print(f"  done       {change.what}", file=out)
     return made
@@ -514,6 +524,10 @@ def main(argv: list[str] | None = None, run: Runner = gcloud, answer: Callable[[
         made = apply(result.changes, run, out, sleep)
     except GcloudError as failed:
         print(f"Stopped: gcloud {shlex.join(failed.args_)} failed ({failed.reason}).", file=out)
+        if failed.retried and failed.reason == "permission_denied":
+            print("It was retried for a minute: IAM may not have caught up yet with the service account created "
+                  "just before. Wait a few minutes and run it again. If it still stops, the cause is a missing role:",
+                  file=out)
         print(_HELP.get(failed.reason, failed.stderr.strip()[:300]), file=out)
         print("The changes printed above as done stay. Fix the cause and run it again: it picks up from here.",
               file=out)
