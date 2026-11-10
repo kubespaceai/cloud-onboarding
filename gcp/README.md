@@ -4,7 +4,9 @@
 | --- | --- |
 | `preflight.sh`, `preflight.py` | Read-only pre-flight: shows Kubespace your estate before you grant anything |
 | `preflight.md` | Cloud Shell tutorial for the pre-flight |
-| `tests/` | Tests of the pre-flight against recorded `gcloud` output |
+| `apply.sh`, `apply.py` | Applies the keyless read-only access from the blueprint code on the setup card |
+| `apply.md` | Cloud Shell tutorial for the apply script |
+| `tests/` | Tests of both scripts against recorded `gcloud` output |
 
 ## Read-only pre-flight
 
@@ -49,6 +51,42 @@ bash kubespace-preflight/gcp/preflight.sh --scope folders/123456789012 \
 
 The command on the setup card does the same in one line. Add `--dry-run` to
 print the summary and send nothing.
+
+## Apply the read-only access
+
+`apply.sh` creates the same objects as the Terraform module in
+`terraform/gcp`, under **your** `gcloud` identity. Kubespace receives nothing
+from it. It takes one argument, the blueprint code on the Kubespace setup card:
+
+```text
+kgb1.<p|f|o>.<scope id>.<quota project|->.<pool project|->.<pool project number>.<pool id>.<subject>.<checksum>
+```
+
+The code names the scope (project, folder or organization), the quota
+project, project P that holds the pool, the pool and your Kubespace
+organization's Google subject. `-` means "the same project as before". The
+roles, the APIs and the VPC Service Controls rule are fixed by the code's
+version (`kgb1`) and listed at the top of `apply.py`; a test pins them to the
+Terraform module. A mistyped code fails its checksum and nothing runs.
+
+The script reads first, prints what is missing and asks. Only `yes` applies.
+It only adds: it never removes a binding, a rule or an object. It prints each
+change, and running it again prints `Nothing to change`.
+
+```bash
+gcloud auth login
+git clone --depth 1 --branch v1.3.0 https://github.com/kubespaceai/cloud-onboarding.git kubespace-onboarding
+bash kubespace-onboarding/gcp/apply.sh --code kgb1.f.123456789012.my-quota-project.-.222222222222.kubespace-0123456789.104712345678901234567.abc123
+```
+
+Options: `--vpc-sc-perimeter accessPolicies/<number>/servicePerimeters/<name>`
+adds the ingress rule for `kubespace-reader` to that perimeter, keeping its
+other rules. `--dry-run` prints the changes and the exact `gcloud` commands
+and makes none. `--yes` applies without asking.
+
+The roles you need: Service Usage Admin and Workload Identity Pool Admin and
+Service Account Admin on P, the IAM admin role of the scope, and Access
+Context Manager Editor for a perimeter.
 
 ### Tests
 
