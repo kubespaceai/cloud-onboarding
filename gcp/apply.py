@@ -15,7 +15,8 @@ objects as the Terraform module in ``terraform/gcp`` (a test pins the two togeth
   services only.
 
 It reads first and prints what is missing, asks, then creates only that and prints each change.
-Nothing is ever removed or replaced, and running it again changes nothing.
+Nothing is ever removed or replaced (a pool or provider you revoked is undeleted), and running it again
+changes nothing.
 
 Standard library only. Needs python3 (3.9 or later) and gcloud on PATH.
 """
@@ -216,6 +217,12 @@ class Change:
     args: list[str]
     file: str | None = None  # Content for the one argument that names a file ({file}).
     after_account_create: bool = False  # Follows creating the service account: IAM takes a while to see it.
+    # A deleted pool or provider is kept for 30 days and still owns its id, so a create answers ALREADY_EXISTS
+    # (and a describe may answer NOT_FOUND). ``undelete`` is tried when the create says it exists; ``then`` runs
+    # once it is back, to set it to the blueprint. ``undeleted`` names the object a restore brought back.
+    undelete: list[str] | None = None
+    then: list[list[str]] = field(default_factory=list)
+    undeleted: str | None = None
 
     def command(self, path: str = "FILE") -> list[str]:
         return [a.replace("{file}", path) for a in self.args]
@@ -283,6 +290,24 @@ def _admits(rule: dict[str, Any], identity: str, services: list[str]) -> bool:
         and "*" in (target.get("resources") or [])
 
 
+def _read_account(cloud: Cloud, reader: str, project: str) -> Any:
+    """The reader's description, or None when it does not exist.
+
+    Google answers a describe of a service account that does not exist with PERMISSION_DENIED "(or it may not
+    exist)", the same words as a real denial. Listing the project's accounts tells them apart: a list that works
+    and omits the reader means it does not exist yet; one that names it, or that is denied too, is a real denial.
+    """
+    try:
+        return cloud.read("iam", "service-accounts", "describe", reader, f"--project={project}")
+    except GcloudError as failed:
+        if failed.reason != "permission_denied" or "may not exist" not in failed.stderr.lower():
+            raise
+        listed = cloud.read("iam", "service-accounts", "list", f"--project={project}")  # A denial raises as before.
+        if any(isinstance(a, dict) and a.get("email") == reader for a in listed or []):
+            raise failed from None
+        return None
+
+
 def plan(bp: dict[str, Any], cloud: Cloud, perimeter: str | None = None) -> Plan:
     """What already matches and what is missing. Reads only."""
     result = Plan()
@@ -296,10 +321,13 @@ def plan(bp: dict[str, Any], cloud: Cloud, perimeter: str | None = None) -> Plan
     if found is None:
         result.changes.append(Change(f"create Workload Identity pool {pool_id} in {p}",
                                      ["iam", "workload-identity-pools", "create", pool_id, *where,
-                                      "--display-name=Kubespace"]))
+                                      "--display-name=Kubespace"],
+                                     undelete=["iam", "workload-identity-pools", "undelete", pool_id, *where],
+                                     undeleted=f"Workload Identity pool {pool_id} in {p}"))
     elif found.get("state") == "DELETED":
         result.changes.append(Change(f"restore deleted Workload Identity pool {pool_id} in {p}",
-                                     ["iam", "workload-identity-pools", "undelete", pool_id, *where]))
+                                     ["iam", "workload-identity-pools", "undelete", pool_id, *where],
+                                     undeleted=f"Workload Identity pool {pool_id} in {p}"))
     else:
         result.unchanged.append(f"Workload Identity pool {pool_id} in {p}")
 
@@ -308,26 +336,32 @@ def plan(bp: dict[str, Any], cloud: Cloud, perimeter: str | None = None) -> Plan
     provider_args = [pool["provider_id"], *where, f"--workload-identity-pool={pool_id}"]
     found_provider = None if found is None else \
         cloud.read("iam", "workload-identity-pools", "providers", "describe", *provider_args)
+    update = ["iam", "workload-identity-pools", "providers", "update-oidc", *provider_args, *trust]
     if found_provider is None:
+        # Not found may be a provider deleted with its pool: its id is still taken, so the create says it exists.
+        # Restore it, then set it to the trust the blueprint names.
         result.changes.append(Change(f"create provider {pool['provider_id']} that accepts only your Kubespace org",
                                      ["iam", "workload-identity-pools", "providers", "create-oidc", *provider_args,
-                                      "--display-name=Kubespace org", *trust]))
+                                      "--display-name=Kubespace org", *trust],
+                                     undelete=["iam", "workload-identity-pools", "providers", "undelete",
+                                               *provider_args],
+                                     then=[update], undeleted=f"provider {pool['provider_id']}"))
     else:
-        if found_provider.get("state") == "DELETED":
+        deleted = found_provider.get("state") == "DELETED"
+        if deleted:
             result.changes.append(Change(f"restore deleted provider {pool['provider_id']}",
                                          ["iam", "workload-identity-pools", "providers", "undelete",
-                                          *provider_args]))
+                                          *provider_args], undeleted=f"provider {pool['provider_id']}"))
         matches = (found_provider.get("attributeCondition") == pool["attribute_condition"]
                    and found_provider.get("attributeMapping") == pool["attribute_mapping"]
                    and (found_provider.get("oidc") or {}).get("issuerUri") == pool["issuer"])
-        if matches:
+        if matches and not deleted:
             result.unchanged.append(f"provider {pool['provider_id']} (accepts only your Kubespace org)")
-        else:
+        elif not matches:
             result.changes.append(Change(f"set provider {pool['provider_id']} to accept only your Kubespace org",
-                                         ["iam", "workload-identity-pools", "providers", "update-oidc",
-                                          *provider_args, *trust]))
+                                         update))
 
-    account = cloud.read("iam", "service-accounts", "describe", reader, f"--project={p}")
+    account = _read_account(cloud, reader, p)
     if account is None:
         result.changes.append(Change(f"create service account {reader}",
                                      ["iam", "service-accounts", "create", READER_ACCOUNT_ID, f"--project={p}",
@@ -420,14 +454,37 @@ def apply(changes: list[Change], run: Runner, out: Any, sleep: Callable[[float],
         finally:
             if path:
                 os.unlink(path)
+        if reason == "already_exists" and change.undelete and _restore(change, run, out):
+            made += 1
+            continue
         if reason == "already_exists":
             print(f"  exists     {change.what}", file=out)
             continue
         if code != 0:
             raise GcloudError(args, reason or "error", err, retried)
         made += 1
-        print(f"  done       {change.what}", file=out)
+        if "undelete" in args and change.undeleted:
+            print(f"  undeleted  {change.undeleted}", file=out)
+        else:
+            print(f"  done       {change.what}", file=out)
     return made
+
+
+def _restore(change: Change, run: Runner, out: Any) -> bool:
+    """The create found the id taken: undelete the object, then run ``then``. False when it is not deleted."""
+    assert change.undelete is not None
+    code, _, err = run(change.undelete)
+    if code != 0:
+        reason = classify(err)
+        if reason in ("permission_denied", "vpc_sc_blocked", "api_not_enabled"):
+            raise GcloudError(change.undelete, reason, err)
+        return False  # It is not deleted: it exists, as the create said.
+    print(f"  undeleted  {change.undeleted}", file=out)
+    for args in change.then:
+        code, _, err = run(args)
+        if code != 0:
+            raise GcloudError(args, classify(err), err)
+    return True
 
 
 TTY = "/dev/tty"

@@ -75,6 +75,15 @@ Run the same command again. Every object now matches, so it prints
 `Nothing to change` and changes nothing. If a step was refused the first time,
 this run picks up from there.
 
+## Reconnecting a project you revoked
+
+When you revoke a connection, Google keeps the pool and provider for 30 days
+as deleted objects, and a reconnect uses the same names. The script restores
+them (it prints `undeleted` and names each one) and sets the provider back to
+accept only your Kubespace org. If `kubespace-reader` does not exist yet, the
+script creates it; it does not stop for a permission error. One run is enough:
+there is nothing to undelete by hand.
+
 ## Check it in the console
 
 Open the
