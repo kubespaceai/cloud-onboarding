@@ -8,7 +8,7 @@ or service-account key is created, and nothing is stored at Kubespace.
 | Submodule | Grants | Covers |
 | --- | --- | --- |
 | `aws` | Role `KubespaceReadOnly` (SecurityAudit, ViewOnlyAccess) in this account, and a service-managed StackSet that deploys the same role (`role.yaml`) to every account of the units you choose | Every account in those units, including accounts added later. Accounts that leave lose the role. |
-| `azure` | A user-assigned managed identity with a federated credential for your Kubespace subject, and **Reader** on a management group | Every subscription under the group, including subscriptions added later |
+| `azure` | A user-assigned managed identity with a federated credential for your Kubespace subject, and **Reader** on a management group, a subscription or a resource group | Every subscription under the group, including subscriptions added later; or the one subscription or resource group |
 | `gcp` | A Workload Identity pool, provider and `kubespace-reader` service account in a project of your organization, that only your Kubespace org's subject may impersonate; the read roles of a single-project connection (including `roles/orgpolicy.policyViewer`) to that reader on a project, or plus `roles/browser` on a folder or organization; the read APIs; optionally a VPC Service Controls ingress rule | The project, or every project under the folder or organization, including projects added later |
 
 Use only the submodules you need; each one needs only its own provider.
@@ -61,6 +61,33 @@ Module 1.1 and earlier granted your Kubespace org's own service account
 scopes, so existing calls apply unchanged; module 1.2 also enables the remaining
 read APIs on the quota project.
 
+### Azure scopes (module 1.4)
+
+Since module 1.4 the `azure` submodule assigns Reader at the scope that
+`scope_type` names. `management_group` is the default, so calls written for
+module 1.3 or earlier apply unchanged.
+
+```hcl
+module "kubespace_azure" {
+  source = "git::https://github.com/kubespaceai/cloud-onboarding.git//terraform/azure?ref=v1.4.0"
+
+  org_subject = "<subject Kubespace gives you>"
+
+  scope_type      = "subscription" # or "management_group" with management_group_id,
+  subscription_id = "<subscription ID>" # or "resource_group" with scope_resource_group too
+  location        = "westeurope"  # region of the resource group created for the identity
+}
+```
+
+The identity lives in `resource_group_name` (`rg-kubespace-reader`), which the
+module creates in the provider's subscription. With `create_resource_group =
+false` it goes in a resource group that already exists instead, for example the
+one a `resource_group` scope reads, and `location` is not needed.
+
+For a management group, `kubespace_setup` is the body of
+`POST /api/v1/cloud-org-scopes/azure/setup`. For a subscription or resource
+group, it is the body of `POST /api/v1/cloud-connections/azure/setup`.
+
 The paths are `terraform/aws`, `terraform/azure` and `terraform/gcp`. Their
 inputs and outputs are stable within a major version. `examples/basic/main.tf`
 applies all three; replace every value and delete the submodules you don't use.
@@ -91,7 +118,8 @@ accounts show as no longer connected.
   with AWS Organizations must be on. The management account itself is not a
   StackSet target; this module creates its role directly.
 - Azure: configure the `azurerm` provider for the subscription that holds the
-  managed identity. You need permission to assign roles on the management group.
+  managed identity. You need permission to assign roles at the scope (for
+  example User Access Administrator or Owner there).
 - Google Cloud: `quota_project_id` is a project under the scope that Kubespace's
   read calls bill (for a project scope, the project itself). You need permission
   to set IAM policy on the scope, and to create the pool and service account in
