@@ -43,10 +43,12 @@ your credentials. Sign in with your own account and follow the link it prints:
 gcloud auth login
 ```
 
-Check the commit you are running. It should match the commit the Kubespace
-setup card names:
+Check the release and the commit you are running. The release should be the
+one the Kubespace setup card names, and the commit should match the commit
+the card names:
 
 ```bash
+git describe --tags
 git rev-parse HEAD
 ```
 
