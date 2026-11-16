@@ -35,10 +35,12 @@ your credentials. Sign in with your own account:
 gcloud auth login
 ```
 
-Check the commit you are running. Compare it with the commit Kubespace names,
-or with `main` on GitHub until `gcp/` is released:
+Check the release and the commit you are running. The release should be the
+one the Kubespace setup card names, and the commit should match the commit
+the card names:
 
 ```bash
+git describe --tags
 git rev-parse HEAD
 ```
 
