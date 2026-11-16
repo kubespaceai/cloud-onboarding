@@ -10,12 +10,14 @@ Do not use `main` for onboarding. Use the release that Kubespace links to.
 | --- | --- |
 | `terraform/` | Released from `v1.1.0` |
 | `gcp/` | Not released yet |
+| `azure/` | Not released yet |
 
 ## What lives here
 
 | Path | Contents |
 | --- | --- |
 | `gcp/` | Google Cloud: Cloud Shell tutorial, read-only pre-flight script, apply script |
+| `azure/` | Azure: read-only pre-flight script for Azure Cloud Shell |
 | `terraform/` | Onboarding Terraform modules for Google Cloud, AWS and Azure |
 
 The step-by-step guides are on [docs.kubespace.ai](https://docs.kubespace.ai).
