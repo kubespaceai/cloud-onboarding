@@ -106,9 +106,9 @@ class Reader:
         except ValueError:
             raise Unreadable("error") from None
 
-    def get(self, path: str, api_version: str) -> Any:
+    def get(self, path: str, api_version: str, query: str = "") -> Any:
         """One ARM GET. ``az rest`` signs it with your session; the token never leaves az."""
-        return self.json("rest", "--method", "get", "--url", f"{API}{path}?api-version={api_version}")
+        return self.json("rest", "--method", "get", "--url", f"{API}{path}?api-version={api_version}{query}")
 
 
 def _display(value: Any) -> str | None:
@@ -146,6 +146,8 @@ def directory_of(reader: Reader) -> dict[str, Any]:
 
 def _walk(node: dict[str, Any], parent: str | None, groups: list[dict[str, Any]], subs: dict[str, str | None],
           names: dict[str, str]) -> None:
+    # ARM puts the root's display name and children under properties; nested children carry them directly.
+    node = {**node, **(node.get("properties") or {})}
     kind = str(node.get("type", "")).lower()
     name = str(node.get("name", ""))
     if kind.endswith("/subscriptions") or kind == "/subscriptions":
@@ -189,7 +191,10 @@ def estate(reader: Reader, kind: str, ident: str, tenant: str | None) -> tuple[d
         try:
             if not root:
                 raise Unreadable("not_signed_in")
-            tree = reader.json("account", "management-group", "show", "--name", root, "--expand", "--recurse") or {}
+            # A plain ARM GET. Not `az account management-group show`: that command registers the
+            # Microsoft.Management resource provider in the current subscription, which is a write.
+            tree = reader.get(f"/providers/Microsoft.Management/managementGroups/{root}", "2021-04-01",
+                              "&$expand=children&$recurse=true") or {}
             _walk(tree, None, groups, in_tree, names)
             group_section = {"status": "read", "items": groups}
             if len(groups) >= MAX_GROUPS:
