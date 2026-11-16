@@ -1,7 +1,8 @@
-# Kubespace's read-only role in this account and, through a service-managed StackSet, in
-# every account of the units you choose. The StackSet deploys role.yaml, the same template
-# as a single-account connection. Accounts that join a unit get the role; accounts that
-# leave lose it. No access key or user is created.
+# Kubespace's read-only role in this account (role.yaml as Terraform) and, when you name
+# units, through a service-managed StackSet, in every account of those units
+# (organization.yaml as Terraform). The StackSet deploys role.yaml, the same template as a
+# single-account connection. Accounts that join a unit get the role; accounts that leave
+# lose it. No access key, user or external ID is created.
 
 data "aws_caller_identity" "current" {}
 
@@ -30,9 +31,11 @@ locals {
     "arn:aws:iam::aws:policy/SecurityAudit",
     "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess",
   ]
+  # Without units this is a single-account connection: the role only, as role.yaml.
+  organization = length(var.organizational_unit_ids) > 0
 }
 
-# In this account the role lets Kubespace list the accounts of the units.
+# The role Kubespace reads this account with. With units, it also lists their accounts.
 resource "aws_iam_role" "kubespace_read_only" {
   name               = local.role_name
   assume_role_policy = jsonencode(local.trust_policy)
@@ -46,6 +49,8 @@ resource "aws_iam_role_policy_attachment" "kubespace_read" {
 }
 
 resource "aws_cloudformation_stack_set" "kubespace_read_only" {
+  count = local.organization ? 1 : 0
+
   name             = "Kubespace-ReadOnly"
   description      = "Kubespace's read-only role, from role.yaml, in every account of the chosen units."
   permission_model = "SERVICE_MANAGED"
@@ -80,11 +85,24 @@ resource "aws_cloudformation_stack_set" "kubespace_read_only" {
 }
 
 resource "aws_cloudformation_stack_set_instance" "units" {
-  stack_set_name            = aws_cloudformation_stack_set.kubespace_read_only.name
+  count = local.organization ? 1 : 0
+
+  stack_set_name            = aws_cloudformation_stack_set.kubespace_read_only[0].name
   call_as                   = var.call_as
   stack_set_instance_region = data.aws_region.current.region
 
   deployment_targets {
     organizational_unit_ids = var.organizational_unit_ids
   }
+}
+
+# Module 1.5 and earlier always created the StackSet; their state moves without a change.
+moved {
+  from = aws_cloudformation_stack_set.kubespace_read_only
+  to   = aws_cloudformation_stack_set.kubespace_read_only[0]
+}
+
+moved {
+  from = aws_cloudformation_stack_set_instance.units
+  to   = aws_cloudformation_stack_set_instance.units[0]
 }

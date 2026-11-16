@@ -7,7 +7,7 @@ or service-account key is created, and nothing is stored at Kubespace.
 
 | Submodule | Grants | Covers |
 | --- | --- | --- |
-| `aws` | Role `KubespaceReadOnly` (SecurityAudit, ViewOnlyAccess) in this account, and a service-managed StackSet that deploys the same role (`role.yaml`) to every account of the units you choose | Every account in those units, including accounts added later. Accounts that leave lose the role. |
+| `aws` | Role `KubespaceReadOnly` (SecurityAudit, ViewOnlyAccess) in this account, as `role.yaml`; with units, also a service-managed StackSet that deploys the same role to every account of those units, as `organization.yaml` | This account; or every account in those units, including accounts added later. Accounts that leave lose the role. |
 | `azure` | A user-assigned managed identity with a federated credential for your Kubespace subject, and **Reader** on a management group, a subscription or a resource group | Every subscription under the group, including subscriptions added later; or the one subscription or resource group |
 | `gcp` | A Workload Identity pool, provider and `kubespace-reader` service account in a project of your organization, that only your Kubespace org's subject may impersonate; the read roles of a single-project connection (including `roles/orgpolicy.policyViewer`) to that reader on a project, or plus `roles/browser` on a folder or organization; the read APIs; optionally a VPC Service Controls ingress rule | The project, or every project under the folder or organization, including projects added later |
 
@@ -87,6 +87,32 @@ one a `resource_group` scope reads, and `location` is not needed.
 For a management group, `kubespace_setup` is the body of
 `POST /api/v1/cloud-org-scopes/azure/setup`. For a subscription or resource
 group, it is the body of `POST /api/v1/cloud-connections/azure/setup`.
+
+### AWS accounts (module 1.6)
+
+Since module 1.6 `organizational_unit_ids` is optional. Without it, the `aws`
+submodule creates only the role `KubespaceReadOnly` in the account the `aws`
+provider targets, with the same trust and policies as the single-account
+CloudFormation template. Calls written for module 1.5 or earlier, with units,
+apply unchanged.
+
+```hcl
+module "kubespace_aws" {
+  source = "git::https://github.com/kubespaceai/cloud-onboarding.git//terraform/aws?ref=v1.6.0"
+  # Or from the Terraform Registry, the same release:
+  #   source  = "kubespaceai/kubespace-onboarding/aws"
+  #   version = "1.6.0"
+
+  org_subject  = "<subject Kubespace gives you>"
+  org_audience = "<audience Kubespace gives you>"
+
+  organizational_unit_ids = [] # or ["r-...", "ou-..."] for an organisation
+}
+```
+
+Without units, `kubespace_account_setup` is the body of
+`POST /api/v1/cloud-connections/aws/setup`. With units, `kubespace_setup` holds
+one body of `POST /api/v1/cloud-org-scopes/aws/setup` per unit.
 
 The paths are `terraform/aws`, `terraform/azure` and `terraform/gcp`. Their
 inputs and outputs are stable within a major version. `examples/basic/main.tf`

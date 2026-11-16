@@ -19,14 +19,15 @@ variable "org_audience" {
 }
 
 variable "organizational_unit_ids" {
-  description = "The organisation root (r-...) or the organisational units (ou-...) whose accounts Kubespace reads."
+  description = "The organisation root (r-...) or the organisational units (ou-...) whose accounts Kubespace reads. Leave empty to connect only this account."
   type        = list(string)
+  default     = []
 
   validation {
-    condition = length(var.organizational_unit_ids) > 0 && alltrue([
+    condition = alltrue([
       for id in var.organizational_unit_ids : can(regex("^(r-[0-9a-z]{4,32}|ou-[0-9a-z]{4,32}-[a-z0-9]{8,32})$", id))
     ])
-    error_message = "Give at least one root (r-...) or organisational unit (ou-...) ID."
+    error_message = "Give root (r-...) or organisational unit (ou-...) IDs, or none for this account only."
   }
 }
 
@@ -42,7 +43,7 @@ variable "call_as" {
 }
 
 variable "display_name" {
-  description = "Name Kubespace shows for the connection; each unit's ID is added to it."
+  description = "Name Kubespace shows for the connection; with units, each unit's ID is added to it. Defaults to \"AWS organisation\", or \"AWS account <ID>\" without units."
   type        = string
-  default     = "AWS organisation"
+  default     = null
 }
