@@ -38,6 +38,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 BLUEPRINT = "kgb1"
+# SEC-887 (ADR-045): a kgb2 code adds the optional feature groups chosen on the setup card, as letters.
+# A kgb1 code is all four groups.
+BLUEPRINT_GROUPS = "kgb2"
 # The read roles, as in terraform/gcp/main.tf: a folder or organization also gets roles/browser so
 # Kubespace can list the projects under it.
 READ_ROLES = (
@@ -54,6 +57,17 @@ READ_ROLES = (
     "roles/serviceusage.serviceUsageConsumer",
 )
 SCOPE_ROLES = ("roles/browser",)
+# The optional feature groups, as in terraform/gcp/main.tf: each one's roles and the APIs only they probe.
+# The other roles are the core, always granted. The letter is the group's in a kgb2 code.
+FEATURE_GROUPS = {
+    "supply_chain": ("s", ("roles/artifactregistry.reader", "roles/binaryauthorization.policyViewer",
+                           "roles/cloudbuild.builds.viewer", "roles/clouddeploy.viewer"),
+                     ("artifactregistry.googleapis.com", "binaryauthorization.googleapis.com",
+                      "cloudbuild.googleapis.com", "clouddeploy.googleapis.com")),
+    "fleet": ("f", ("roles/gkehub.viewer",), ("gkehub.googleapis.com",)),
+    "governance": ("g", ("roles/orgpolicy.policyViewer",), ("orgpolicy.googleapis.com",)),
+    "secrets_inventory": ("i", ("roles/secretmanager.viewer",), ("secretmanager.googleapis.com",)),
+}
 # Enabled in the quota project, which Kubespace's read calls bill.
 READ_APIS = (
     "artifactregistry.googleapis.com",
@@ -92,8 +106,9 @@ MAPPING = {"google.subject": "assertion.sub"}
 IMPERSONATION_ROLE = "roles/iam.workloadIdentityUser"
 
 _PROJECT = r"[a-z][a-z0-9-]{4,28}[a-z0-9]"
-_CODE = re.compile(rf"{BLUEPRINT}\.([pfo])\.([a-z0-9-]{{1,30}})\.(-|{_PROJECT})\.(-|{_PROJECT})\.([0-9]{{6,19}})\."
-                   r"([a-z0-9-]{4,32})\.([0-9]{6,32})\.([0-9a-f]{6})\Z")
+_CODE = re.compile(rf"({BLUEPRINT}|{BLUEPRINT_GROUPS})\.([pfo])\.([a-z0-9-]{{1,30}})\.(-|{_PROJECT})\."
+                   rf"(-|{_PROJECT})\.([0-9]{{6,19}})\.([a-z0-9-]{{4,32}})\.([0-9]{{6,32}})(?:\.(-|s?f?g?i?))?\."
+                   r"([0-9a-f]{6})\Z")
 _PROJECT_ID = re.compile(_PROJECT + r"\Z")
 _NUMERIC = re.compile(r"[0-9]{1,20}\Z")
 _PERIMETER = re.compile(r"accessPolicies/([0-9]{1,20})/servicePerimeters/([A-Za-z0-9_]{1,50})\Z")
@@ -113,6 +128,8 @@ def decode(code: str) -> dict[str, Any]:
 
     ``kgb1.<p|f|o>.<scope id>.<quota project|->.<pool project|->.<pool project number>.<pool id>.<subject>.<check>``:
     ``-`` for the quota project means the scope's project; for the pool project, the quota project.
+    A ``kgb2`` code adds ``.<groups>`` before the check: the letters of the feature groups chosen, in
+    the order of :data:`FEATURE_GROUPS`, or ``-`` for the core roles only.
     """
     match = _CODE.fullmatch(code.strip())
     if match is None:
@@ -120,7 +137,14 @@ def decode(code: str) -> dict[str, Any]:
     body, check = code.strip().rsplit(".", 1)
     if checksum(body) != check:
         raise ValueError("the blueprint code's checksum does not match: copy it again from the setup card")
-    kind_letter, scope_id, quota, pool_project, number, pool_id, subject, _ = match.groups()
+    version, kind_letter, scope_id, quota, pool_project, number, pool_id, subject, letters, _ = match.groups()
+    if (version == BLUEPRINT_GROUPS) != (letters is not None) or letters == "":
+        raise ValueError("this is not a Kubespace blueprint code: copy it again from the setup card")
+    groups = [g for g, (letter, _, _) in FEATURE_GROUPS.items() if letters is None or letter in letters]
+    left_out = [g for g in FEATURE_GROUPS if g not in groups]
+    left_out_roles = {r for g in left_out for r in FEATURE_GROUPS[g][1]}
+    left_out_apis = {a for g in left_out for a in FEATURE_GROUPS[g][2]}
+    roles = [r for r in READ_ROLES if r not in left_out_roles]
     kind = _KIND[kind_letter]
     if kind == "project":
         if not _PROJECT_ID.fullmatch(scope_id):
@@ -136,7 +160,8 @@ def decode(code: str) -> dict[str, Any]:
     member = (f"principal://iam.googleapis.com/projects/{number}/locations/global/"
               f"workloadIdentityPools/{pool_id}/subject/{subject}")
     return {
-        "blueprint": BLUEPRINT,
+        "blueprint": version,
+        "feature_groups": groups,
         "scope": {"type": kind, "id": scope_id},
         "quota_project": quota,
         "pool": {"project_id": pool_project, "project_number": number, "pool_id": pool_id,
@@ -144,19 +169,29 @@ def decode(code: str) -> dict[str, Any]:
                  "attribute_condition": f"assertion.sub == '{subject}'"},
         "reader": reader,
         "impersonation_member": member,
-        "roles": list(READ_ROLES if kind == "project" else READ_ROLES + SCOPE_ROLES),
-        "apis": {"pool_project": list(POOL_APIS), "quota_project": list(READ_APIS)},
+        "roles": roles if kind == "project" else roles + list(SCOPE_ROLES),
+        "apis": {"pool_project": list(POOL_APIS), "quota_project": [a for a in READ_APIS if a not in left_out_apis]},
         "vpc_sc": {"identity": f"serviceAccount:{reader}", "services": list(VPC_SC_SERVICES)},
     }
 
 
 def encode(scope_type: str, scope_id: str, quota: str, pool_project: str, number: str, pool_id: str,
-           subject: str) -> str:
-    """The code for a blueprint; Kubespace builds the same string (tests pin both sides)."""
+           subject: str, feature_groups: list[str] | None = None) -> str:
+    """The code for a blueprint; Kubespace builds the same string (tests pin both sides).
+
+    ``feature_groups`` None or all four is a kgb1 code, as before; any other choice is a kgb2 code.
+    """
     letter = {v: k for k, v in _KIND.items()}[scope_type]
     quota_part = "-" if scope_type == "project" and quota == scope_id else quota
     pool_part = "-" if pool_project == quota else pool_project
-    body = ".".join((BLUEPRINT, letter, scope_id, quota_part, pool_part, number, pool_id, subject))
+    parts = [BLUEPRINT, letter, scope_id, quota_part, pool_part, number, pool_id, subject]
+    if feature_groups is not None and set(feature_groups) != set(FEATURE_GROUPS):
+        unknown = set(feature_groups) - set(FEATURE_GROUPS)
+        if unknown:
+            raise ValueError(f"unknown feature groups: {', '.join(sorted(unknown))}")
+        parts[0] = BLUEPRINT_GROUPS
+        parts.append("".join(FEATURE_GROUPS[g][0] for g in FEATURE_GROUPS if g in feature_groups) or "-")
+    body = ".".join(parts)
     return f"{body}.{checksum(body)}"
 
 
@@ -520,6 +555,9 @@ def _describe(bp: dict[str, Any], perimeter: str | None, out: Any) -> None:
     print(f"  accepts only       {pool['attribute_condition']}", file=out)
     print(f"  reader             {bp['reader']}", file=out)
     print(f"  read roles         {len(bp['roles'])} on the scope", file=out)
+    left_out = [g for g in FEATURE_GROUPS if g not in bp["feature_groups"]]
+    print(f"  feature groups     {', '.join(bp['feature_groups']) or 'none, core roles only'}"
+          + (f" (left out: {', '.join(left_out)})" if left_out else ""), file=out)
     print(f"  quota project      {bp['quota_project']}", file=out)
     print(f"  VPC-SC perimeter   {perimeter or 'none (add --vpc-sc-perimeter if one surrounds the scope)'}", file=out)
     print("", file=out)

@@ -20,7 +20,37 @@ locals {
     "roles/secretmanager.viewer",
     "roles/serviceusage.serviceUsageConsumer",
   ]
-  roles = var.scope_type == "project" ? local.read_roles : concat(local.read_roles, ["roles/browser"])
+  # ADR-045: four optional feature groups, each of them all its roles or none. The other four roles
+  # (Cloud Asset, Compute network, Kubernetes Engine and Service Usage) are the core, always granted.
+  feature_group_roles = {
+    supply_chain = [
+      "roles/artifactregistry.reader",
+      "roles/binaryauthorization.policyViewer",
+      "roles/cloudbuild.builds.viewer",
+      "roles/clouddeploy.viewer",
+    ]
+    fleet             = ["roles/gkehub.viewer"]
+    governance        = ["roles/orgpolicy.policyViewer"]
+    secrets_inventory = ["roles/secretmanager.viewer"]
+  }
+  # The APIs only a group's roles probe: a group left out enables none of them.
+  feature_group_apis = {
+    supply_chain = [
+      "artifactregistry.googleapis.com",
+      "binaryauthorization.googleapis.com",
+      "cloudbuild.googleapis.com",
+      "clouddeploy.googleapis.com",
+    ]
+    fleet             = ["gkehub.googleapis.com"]
+    governance        = ["orgpolicy.googleapis.com"]
+    secrets_inventory = ["secretmanager.googleapis.com"]
+  }
+  left_out       = [for group in keys(local.feature_group_roles) : group if !contains(var.feature_groups, group)]
+  left_out_roles = flatten([for group in local.left_out : local.feature_group_roles[group]])
+  left_out_apis  = flatten([for group in local.left_out : local.feature_group_apis[group]])
+  granted_roles  = [for role in local.read_roles : role if !contains(local.left_out_roles, role)]
+
+  roles = var.scope_type == "project" ? local.granted_roles : concat(local.granted_roles, ["roles/browser"])
 
   # The APIs Kubespace's read calls use, enabled on the quota project. Cloud Resource Manager and
   # Org Policy have their own resources (module 1.0 and 1.1), so their addresses stay the same.
@@ -165,14 +195,23 @@ resource "google_project_service" "resource_manager" {
 }
 
 # Discovery reads effective org policies (Domain Restricted Sharing and others) through this API.
+# Only with the governance group: its one role is the only one that probes it.
 resource "google_project_service" "org_policy" {
+  count = contains(local.left_out_apis, "orgpolicy.googleapis.com") ? 0 : 1
+
   project            = local.quota_project
   service            = "orgpolicy.googleapis.com"
   disable_on_destroy = false
 }
 
+# Module 1.8 counts this resource; a call made before keeps its address and changes nothing.
+moved {
+  from = google_project_service.org_policy
+  to   = google_project_service.org_policy[0]
+}
+
 resource "google_project_service" "read" {
-  for_each = toset(local.read_apis)
+  for_each = toset([for api in local.read_apis : api if !contains(local.left_out_apis, api)])
 
   project            = local.quota_project
   service            = each.value

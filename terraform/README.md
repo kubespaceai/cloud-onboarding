@@ -150,6 +150,14 @@ accounts show as no longer connected.
   read calls bill (for a project scope, the project itself). You need permission
   to set IAM policy on the scope, and to create the pool and service account in
   P. The ingress rule needs Access Context Manager editor on the policy.
+- Google Cloud, optional feature groups (module 1.8): `feature_groups` lists the
+  groups Kubespace reads besides its four core roles (Cloud Asset, Compute
+  network, Kubernetes Engine, Service Usage). All four by default:
+  `supply_chain` (Artifact Registry, Binary Authorization, Cloud Build, Cloud
+  Deploy), `fleet` (GKE Hub), `governance` (Org Policy) and
+  `secrets_inventory` (Secret Manager names and metadata). A group left out
+  grants none of its roles and enables none of its APIs. A call without it
+  plans no change on upgrade.
 
 ## Tests
 

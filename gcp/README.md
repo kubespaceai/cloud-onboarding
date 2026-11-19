@@ -69,6 +69,15 @@ roles, the APIs and the VPC Service Controls rule are fixed by the code's
 version (`kgb1`) and listed at the top of `apply.py`; a test pins them to the
 Terraform module. A mistyped code fails its checksum and nothing runs.
 
+If you left out optional feature groups on the setup card, the code starts
+with `kgb2.` and adds the groups you kept before the checksum, one letter
+each: `s` supply chain (Artifact Registry, Binary Authorization, Cloud Build,
+Cloud Deploy), `f` fleet (GKE Hub), `g` governance (Org Policy), `i` secrets
+inventory (Secret Manager names and metadata), or `-` for none. The script
+then grants the four core roles and only those groups' roles, and enables only
+the APIs those roles use. The Terraform module takes the same choice as
+`feature_groups`.
+
 The script reads first, prints what is missing and asks. Only `yes` applies.
 It only adds: it never removes a binding, a rule or an object. It prints each
 change, and running it again prints `Nothing to change`.

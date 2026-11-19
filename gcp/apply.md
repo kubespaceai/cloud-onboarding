@@ -22,7 +22,8 @@ the read APIs. These are the same objects as the Kubespace Terraform module in
 You need:
 
 - the **blueprint code** from the Kubespace setup card. It starts with `kgb1.`
-  and names your scope and pool. It is not a secret;
+  (or `kgb2.` if you left out optional feature groups) and names your scope
+  and pool. It is not a secret;
 - the right to change IAM on the scope and on project P. The script names the
   missing role if a step is refused.
 
