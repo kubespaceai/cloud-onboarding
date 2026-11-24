@@ -69,6 +69,26 @@ If a VPC Service Controls perimeter surrounds the scope, add
 script adds one ingress rule that admits `kubespace-reader` only, to the read
 services only, and keeps every rule the perimeter already has.
 
+**Private GKE clusters in that perimeter.** The ingress rule covers Kubespace's
+read calls only. Kubespace's in-cluster components need no other perimeter
+rule, because they call a Kubespace host, not a Google API, and nothing
+connects in to your network. They do need:
+
+- Egress from the nodes: outbound HTTPS (TCP 443) to the Kubespace ingest host
+  named in each cluster's install bundle, through Cloud NAT and, if your VPC
+  denies egress by default, a firewall rule. Your own egress proxy
+  (`HTTPS_PROXY`) works instead.
+- An Artifact Registry mirror inside the perimeter. Each cluster's install
+  bundle copies the charts and images there with their Cosign signatures, and
+  lists the Workload Identity grants that let the controller read it, so
+  in-cluster upgrades still verify every signature. Without a mirror,
+  in-cluster upgrades are off and updates run from the bundle.
+- No firewall rule for the admission webhook: it listens on pod port 10250,
+  which a private control plane already reaches.
+
+When you add each cluster to Fleet, mark it as inside the perimeter, so its
+bundle includes these steps.
+
 To see the changes and the exact `gcloud` commands without making them, add
 `--dry-run`.
 
