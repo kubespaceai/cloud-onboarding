@@ -134,6 +134,25 @@ Without units, `kubespace_account_setup` is the body of
 `POST /api/v1/cloud-connections/aws/setup`. With units, `kubespace_setup` holds
 one body of `POST /api/v1/cloud-org-scopes/aws/setup` per unit.
 
+### AWS EKS write role (module 1.9)
+
+`terraform/aws/eks-write` adds the role `KubespaceEksWrite`, which Kubespace assumes only from its
+Credential Manager, for approved EKS plan steps on clusters tagged `kubespace.ai/managed=true`, and the
+`KubespaceArgoCdCapability` role it passes to EKS. It deploys `eks-write-role.yaml`, the same template as the
+console quick-create link on the Kubespace setup card, as the CloudFormation stack `Kubespace-EksWrite`.
+It does not touch `KubespaceReadOnly`, so call it next to the read role, or on its own. The stack runs only in
+`expected_account_id`. No access key is created. Destroy the call to revoke the role.
+
+```hcl
+module "kubespace_eks_write" {
+  source = "git::https://github.com/kubespaceai/cloud-onboarding.git//terraform/aws/eks-write?ref=v1.9.0"
+
+  org_subject         = "<subject Kubespace gives you>"
+  org_audience        = "<audience Kubespace gives you>"
+  expected_account_id = "<the AWS account ID on the setup card>"
+}
+```
+
 The paths are `terraform/aws`, `terraform/azure` and `terraform/gcp`. Their
 inputs and outputs are stable within a major version. `examples/basic/main.tf`
 applies all three; replace every value and delete the submodules you don't use.

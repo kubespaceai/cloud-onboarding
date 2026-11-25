@@ -1,0 +1,278 @@
+# PRO-3444: the EKS write role (PRO-3209) as a console quick-create stack. services/aws_write_role.py is the source;
+# a unit test keeps this file's trust and policy equal to it.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EKS write role that Kubespace's Credential Manager assumes with your organization's own Google identity, for approved plan steps on clusters tagged kubespace.ai/managed=true. No access key is created.
+Parameters:
+  OrgSubject:
+    Type: String
+    Description: Unique ID of your organization's Kubespace Google service account.
+    AllowedPattern: '[0-9]{1,64}'
+  OrgAudience:
+    Type: String
+    Description: Audience of your organization's Kubespace identity tokens. The write role trusts this audience plus /eks-write.
+    AllowedPattern: https://[^ ]{1,240}
+  ExpectedAccountId:
+    Type: String
+    Description: The AWS account ID on the Kubespace setup card. The stack runs only in that account.
+    AllowedPattern: '[0-9]{12}'
+    ConstraintDescription: must be a 12-digit AWS account ID.
+Rules:
+  AccountMatchesKubespaceSetup:
+    Assertions:
+    - Assert:
+        Fn::Equals:
+        - !Ref 'ExpectedAccountId'
+        - !Ref 'AWS::AccountId'
+      AssertDescription: This AWS account does not match the Kubespace setup. Sign in to the account named in ExpectedAccountId, the one on the Kubespace setup card, and open the link again. No role was created.
+Resources:
+  KubespaceEksWrite:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: KubespaceEksWrite
+      Description: Kubespace EKS writes for approved plan steps (PRO-3209)
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Federated: accounts.google.com
+          Action: sts:AssumeRoleWithWebIdentity
+          Condition:
+            StringEquals:
+              accounts.google.com:aud: !Ref 'OrgSubject'
+              accounts.google.com:sub: !Ref 'OrgSubject'
+              accounts.google.com:oaud: !Sub "${OrgAudience}/eks-write"
+      Policies:
+      - PolicyName: KubespaceEksWrite
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: ReadEks
+            Effect: Allow
+            Resource: '*'
+            Action:
+            - eks:DescribeCluster
+            - eks:ListClusters
+            - eks:DescribeNodegroup
+            - eks:ListNodegroups
+            - eks:ListAccessEntries
+            - eks:DescribeUpdate
+            - eks:ListUpdates
+            - eks:DescribeAddon
+            - eks:ListAddons
+            - eks:DescribeAddonVersions
+          - Sid: CreateTaggedClusters
+            Effect: Allow
+            Action: eks:CreateCluster
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestTag/kubespace.ai/managed: 'true'
+          - Sid: CreateTaggedNodegroups
+            Effect: Allow
+            Action: eks:CreateNodegroup
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:cluster/*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+                aws:RequestTag/kubespace.ai/managed: 'true'
+          - Sid: ChangeTaggedClusters
+            Effect: Allow
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:cluster/*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+            Action:
+            - eks:UpdateClusterConfig
+            - eks:UpdateClusterVersion
+            - eks:DeleteCluster
+          - Sid: ChangeTaggedNodegroups
+            Effect: Allow
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:nodegroup/*/*/*"
+            Action:
+            - eks:UpdateNodegroupConfig
+            - eks:UpdateNodegroupVersion
+            - eks:DeleteNodegroup
+          - Sid: CreateTaggedAddons
+            Effect: Allow
+            Action: eks:CreateAddon
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:cluster/*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+                aws:RequestTag/kubespace.ai/managed: 'true'
+          - Sid: ChangeTaggedAddons
+            Effect: Allow
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:addon/*/*/*"
+            Action:
+            - eks:UpdateAddon
+            - eks:DeleteAddon
+          - Sid: TagOnCreate
+            Effect: Allow
+            Action: eks:TagResource
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestTag/kubespace.ai/managed: 'true'
+          - Sid: ReadKubespaceRoles
+            Effect: Allow
+            Action:
+            - iam:GetRole
+            - iam:ListAttachedRolePolicies
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/*"
+          - Sid: ReadSubnets
+            Effect: Allow
+            Action: ec2:DescribeSubnets
+            Resource: '*'
+          - Sid: ReadNodegroupServiceRole
+            Effect: Allow
+            Action: iam:GetRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
+          - Sid: PassKubespaceClusterAndNodeRoles
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/*"
+            Condition:
+              StringEquals:
+                iam:PassedToService:
+                - eks.amazonaws.com
+                - ec2.amazonaws.com
+          - Sid: EksServiceLinkedRoles
+            Effect: Allow
+            Action: iam:CreateServiceLinkedRole
+            Resource: '*'
+            Condition:
+              StringEquals:
+                iam:AWSServiceName:
+                - eks.amazonaws.com
+                - eks-nodegroup.amazonaws.com
+          - Sid: CreateArgoCdCapabilityOnTaggedClusters
+            Effect: Allow
+            Action: eks:CreateCapability
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:cluster/*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+                aws:RequestTag/kubespace.ai/managed: 'true'
+          - Sid: ChangeTaggedArgoCdCapabilities
+            Effect: Allow
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:capability/*"
+            Action:
+            - eks:DescribeCapability
+            - eks:DeleteCapability
+          - Sid: PassTheCapabilityRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/KubespaceArgoCdCapability"
+            Condition:
+              StringEquals:
+                iam:PassedToService: capabilities.eks.amazonaws.com
+          - Sid: AccessEntriesOnTaggedClusters
+            Effect: Allow
+            Action: eks:CreateAccessEntry
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:cluster/*"
+            Condition:
+              'Null':
+                eks:kubernetesGroups: 'true'
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+                eks:principalArn:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/KubespaceEksWrite"
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/KubespaceArgoCdCapability"
+          - Sid: ReadAndDeleteThoseAccessEntries
+            Effect: Allow
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:access-entry/*"
+            Action:
+            - eks:DescribeAccessEntry
+            - eks:DeleteAccessEntry
+            - eks:ListAssociatedAccessPolicies
+            Condition:
+              StringEquals:
+                eks:principalArn:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/KubespaceEksWrite"
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/KubespaceArgoCdCapability"
+          - Sid: WriteRoleInArgoCdNamespaceOnly
+            Effect: Allow
+            Action: eks:AssociateAccessPolicy
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:access-entry/*"
+            Condition:
+              StringEquals:
+                eks:principalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/KubespaceEksWrite"
+                eks:accessScope: namespace
+                eks:policyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+              ForAllValues:StringEquals:
+                eks:namespaces:
+                - argocd
+          - Sid: CapabilityRoleArgoCdPolicies
+            Effect: Allow
+            Action: eks:AssociateAccessPolicy
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:access-entry/*"
+            Condition:
+              StringEquals:
+                eks:principalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/KubespaceArgoCdCapability"
+                eks:policyArn:
+                - arn:aws:eks::aws:cluster-access-policy/AmazonEKSArgoCDClusterPolicy
+                - arn:aws:eks::aws:cluster-access-policy/AmazonEKSArgoCDPolicy
+          - Sid: ArgoCdCapabilityIdentityCenterApplication
+            Effect: Allow
+            Resource:
+            - arn:aws:sso:::instance/*
+            - !Sub "arn:aws:sso::${AWS::AccountId}:application/*"
+            - arn:aws:sso::aws:applicationProvider/eks
+            Action:
+            - sso:DescribeInstance
+            - sso:CreateApplication
+            - sso:ListApplicationAssignments
+            - sso:PutApplicationAuthenticationMethod
+            - sso:PutApplicationGrant
+          - Sid: CapabilityRoleReadsTheCluster
+            Effect: Allow
+            Action: eks:AssociateAccessPolicy
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:access-entry/*"
+            Condition:
+              StringEquals:
+                eks:principalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/KubespaceArgoCdCapability"
+                eks:accessScope: cluster
+                eks:policyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy
+          - Sid: CapabilityRoleEditsOutsideKubeSystem
+            Effect: Allow
+            Action: eks:AssociateAccessPolicy
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:access-entry/*"
+            Condition:
+              StringEquals:
+                eks:principalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/KubespaceArgoCdCapability"
+                eks:accessScope: namespace
+                eks:policyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy
+              ForAllValues:StringNotLike:
+                eks:namespaces:
+                - kube-*
+  KubespaceArgoCdCapability:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: KubespaceArgoCdCapability
+      Path: /kubespace/
+      Description: EKS Capability for Argo CD on clusters Kubespace installs it on; no permissions (PRO-1695)
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: capabilities.eks.amazonaws.com
+          Action:
+          - sts:AssumeRole
+          - sts:TagSession
+Outputs:
+  RoleArn:
+    Value: !GetAtt 'KubespaceEksWrite.Arn'
+  CapabilityRoleArn:
+    Value: !GetAtt 'KubespaceArgoCdCapability.Arn'
