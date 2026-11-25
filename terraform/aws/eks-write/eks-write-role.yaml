@@ -62,6 +62,7 @@ Resources:
             - eks:DescribeAddon
             - eks:ListAddons
             - eks:DescribeAddonVersions
+            - eks:ListCapabilities
           - Sid: CreateTaggedClusters
             Effect: Allow
             Action: eks:CreateCluster
@@ -144,6 +145,20 @@ Resources:
                 iam:PassedToService:
                 - eks.amazonaws.com
                 - ec2.amazonaws.com
+          - Sid: CreateTaggedAddonPodIdentityAssociations
+            Effect: Allow
+            Action: eks:CreateAddon
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:podidentityassociation/*/*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/kubespace.ai/managed: 'true'
+          - Sid: PassKubespacePodIdentityRoles
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/kubespace/*"
+            Condition:
+              StringEquals:
+                iam:PassedToService: pods.eks.amazonaws.com
           - Sid: EksServiceLinkedRoles
             Effect: Allow
             Action: iam:CreateServiceLinkedRole
@@ -235,6 +250,7 @@ Resources:
             - sso:ListApplicationAssignments
             - sso:PutApplicationAuthenticationMethod
             - sso:PutApplicationGrant
+            - sso:DeleteApplication
           - Sid: CapabilityRoleReadsTheCluster
             Effect: Allow
             Action: eks:AssociateAccessPolicy

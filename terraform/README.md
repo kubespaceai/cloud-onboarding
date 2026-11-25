@@ -145,7 +145,7 @@ It does not touch `KubespaceReadOnly`, so call it next to the read role, or on i
 
 ```hcl
 module "kubespace_eks_write" {
-  source = "git::https://github.com/kubespaceai/cloud-onboarding.git//terraform/aws/eks-write?ref=v1.9.0"
+  source = "git::https://github.com/kubespaceai/cloud-onboarding.git//terraform/aws/eks-write?ref=v1.9.1"
 
   org_subject         = "<subject Kubespace gives you>"
   org_audience        = "<audience Kubespace gives you>"
