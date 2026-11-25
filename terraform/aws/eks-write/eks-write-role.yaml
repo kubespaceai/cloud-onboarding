@@ -152,6 +152,14 @@ Resources:
             Condition:
               StringEquals:
                 aws:RequestTag/kubespace.ai/managed: 'true'
+          - Sid: CreateTaggedPodIdentityAssociationsOnTaggedClusters
+            Effect: Allow
+            Action: eks:CreatePodIdentityAssociation
+            Resource: !Sub "arn:aws:eks:*:${AWS::AccountId}:cluster/*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/kubespace.ai/managed: 'true'
+                aws:RequestTag/kubespace.ai/managed: 'true'
           - Sid: PassKubespacePodIdentityRoles
             Effect: Allow
             Action: iam:PassRole
