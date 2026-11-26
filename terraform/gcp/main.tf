@@ -45,10 +45,21 @@ locals {
     governance        = ["orgpolicy.googleapis.com"]
     secrets_inventory = ["secretmanager.googleapis.com"]
   }
+  # PRO-3577: the opt-in groups, off unless listed in feature_groups. Never in the default, and their
+  # roles and APIs are not in read_roles or read_apis.
+  opt_in_group_roles = {
+    audit_log = ["roles/logging.viewer"]
+  }
+  opt_in_group_apis = {
+    audit_log = ["logging.googleapis.com"]
+  }
   left_out       = [for group in keys(local.feature_group_roles) : group if !contains(var.feature_groups, group)]
   left_out_roles = flatten([for group in local.left_out : local.feature_group_roles[group]])
   left_out_apis  = flatten([for group in local.left_out : local.feature_group_apis[group]])
-  granted_roles  = [for role in local.read_roles : role if !contains(local.left_out_roles, role)]
+  opted_in       = [for group in keys(local.opt_in_group_roles) : group if contains(var.feature_groups, group)]
+  opt_in_roles   = flatten([for group in local.opted_in : local.opt_in_group_roles[group]])
+  opt_in_apis    = flatten([for group in local.opted_in : local.opt_in_group_apis[group]])
+  granted_roles  = concat([for role in local.read_roles : role if !contains(local.left_out_roles, role)], local.opt_in_roles)
 
   roles = var.scope_type == "project" ? local.granted_roles : concat(local.granted_roles, ["roles/browser"])
 
@@ -211,7 +222,7 @@ moved {
 }
 
 resource "google_project_service" "read" {
-  for_each = toset([for api in local.read_apis : api if !contains(local.left_out_apis, api)])
+  for_each = toset(concat([for api in local.read_apis : api if !contains(local.left_out_apis, api)], local.opt_in_apis))
 
   project            = local.quota_project
   service            = each.value

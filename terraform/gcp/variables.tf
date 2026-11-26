@@ -117,14 +117,14 @@ variable "quota_project_id" {
 }
 
 variable "feature_groups" {
-  description = "The optional feature groups Kubespace reads, besides the core roles it always needs: supply_chain (Artifact Registry, Binary Authorization, Cloud Build, Cloud Deploy), fleet (GKE Hub), governance (Org Policy), secrets_inventory (Secret Manager names and metadata). All four by default. A group left out grants none of its roles and enables none of its APIs."
+  description = "The optional feature groups Kubespace reads, besides the core roles it always needs: supply_chain (Artifact Registry, Binary Authorization, Cloud Build, Cloud Deploy), fleet (GKE Hub), governance (Org Policy), secrets_inventory (Secret Manager names and metadata). All four by default. A group left out grants none of its roles and enables none of its APIs. Opt-in, never in the default: audit_log (roles/logging.viewer and the Cloud Logging API), granted only when listed."
   type        = list(string)
   default     = ["supply_chain", "fleet", "governance", "secrets_inventory"]
   nullable    = false
 
   validation {
-    condition     = alltrue([for group in var.feature_groups : contains(["supply_chain", "fleet", "governance", "secrets_inventory"], group)])
-    error_message = "feature_groups lists some of supply_chain, fleet, governance and secrets_inventory."
+    condition     = alltrue([for group in var.feature_groups : contains(["supply_chain", "fleet", "governance", "secrets_inventory", "audit_log"], group)])
+    error_message = "feature_groups lists some of supply_chain, fleet, governance, secrets_inventory and audit_log."
   }
 }
 

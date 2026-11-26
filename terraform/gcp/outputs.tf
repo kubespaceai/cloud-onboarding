@@ -3,7 +3,7 @@
 output "kubespace_setup" {
   description = "For a folder or organization: the body for POST /api/v1/cloud-org-scopes/gcp/setup. For a project: project_id and display_name for POST /api/v1/cloud-connections/gcp/setup."
   # Only the keys that apply; a folder or organization scope without a pool is the 1.x body.
-  # feature_groups only when some are left out: Kubespace reads a body without it as all four.
+  # feature_groups only when some are left out or an opt-in group is listed: Kubespace reads a body without it as all four.
   value = merge({ for k, v in {
     project_id          = var.scope_type == "project" ? var.scope_id : null
     scope_type          = var.scope_type == "project" ? null : var.scope_type
@@ -12,7 +12,7 @@ output "kubespace_setup" {
     display_name        = var.display_name
     pool_project_id     = var.pool_project_id
     pool_project_number = var.pool_project_number
-  } : k => v if v != null }, length(setsubtract(["supply_chain", "fleet", "governance", "secrets_inventory"], var.feature_groups)) == 0 ? {} : { feature_groups = sort(distinct(var.feature_groups)) })
+  } : k => v if v != null }, length(setsubtract(["supply_chain", "fleet", "governance", "secrets_inventory"], var.feature_groups)) == 0 && length(local.opted_in) == 0 ? {} : { feature_groups = sort(distinct(var.feature_groups)) })
   depends_on = [
     google_project_iam_member.kubespace,
     google_folder_iam_member.kubespace,

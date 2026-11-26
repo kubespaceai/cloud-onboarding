@@ -73,7 +73,9 @@ If you left out optional feature groups on the setup card, the code starts
 with `kgb2.` and adds the groups you kept before the checksum, one letter
 each: `s` supply chain (Artifact Registry, Binary Authorization, Cloud Build,
 Cloud Deploy), `f` fleet (GKE Hub), `g` governance (Org Policy), `i` secrets
-inventory (Secret Manager names and metadata), or `-` for none. The script
+inventory (Secret Manager names and metadata), or `-` for none. The opt-in
+`a` audit log (Logging Viewer and the Cloud Logging API) comes last and is
+granted only when the letter is there; a `kgb1` code never grants it. The script
 then grants the four core roles and only those groups' roles, and enables only
 the APIs those roles use. The Terraform module takes the same choice as
 `feature_groups`.

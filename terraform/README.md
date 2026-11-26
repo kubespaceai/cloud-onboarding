@@ -196,7 +196,8 @@ accounts show as no longer connected.
   Deploy), `fleet` (GKE Hub), `governance` (Org Policy) and
   `secrets_inventory` (Secret Manager names and metadata). A group left out
   grants none of its roles and enables none of its APIs. A call without it
-  plans no change on upgrade.
+  plans no change on upgrade. `audit_log` (`roles/logging.viewer` and the
+  Cloud Logging API) is opt-in: never in the default, granted only when listed.
 
 ## Tests
 
